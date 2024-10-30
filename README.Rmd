@@ -1,0 +1,57 @@
+This project contains all the code, data, and output for the Baltimore Mortality Project. Here is a description of the file structure and files.
+
+docs/
+
+\|—————data_analysis.qmd (contains all the code for data visualization)
+
+\|—————final_report.qmd (final report for collaborator)
+
+\|—————figures/
+
+\|—————distribution_of_covariates.png
+
+\|—————fastfd_vs_mortality_by_year.png
+
+\|—————fastfd_vs_mortality_by_age.png
+
+\|—————nohhint_vs_mortality_by_year.png
+
+\|—————nohhint_vs_mortality_by_age.png
+
+\|—————novhcl_vs_mortality_by_year.png
+
+\|—————novhcl_vs_mortality_by_year.png
+
+\|—————mortality_maps.png
+
+\|—————mortality_over_time_by_age.png
+
+R/
+
+\|—————download_data.R
+
+data/
+
+\|—————raw/
+
+\|—————Open Baltimore.csv
+
+\|—————json/
+
+\|—————mortality_infant.json
+
+\|—————mortality_1-14.json
+
+\|—————mortality_15-24.json
+
+\|—————mortality_25-44.json
+
+\|—————mortality_45-64.json
+
+\|—————mortality_65-84.json
+
+\|—————fastfood.json
+
+\|—————no_internet.json
+
+\|—————no_vehicle.json

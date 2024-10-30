@@ -1,0 +1,532 @@
+---
+title: "Baltimore Mortality Project Report"
+execute: 
+  warning: false
+  echo: true
+  eval: false
+format: html
+editor: visual
+---
+
+## Introduction
+
+This report provides a comprehensive analysis of mortality trends in Baltimore, focusing on how various socioeconomic factors, such as vehicle availability, internet access, and fast food density, affect mortality rates across different age groups. Using data from the Baltimore Health Department, spatial maps, scatter plots, and statistical visualizations were created to explore the correlations between these factors and mortality over time.
+
+## Data and Methods
+
+The data for this analysis was sourced from Open Baltimore - a data set from the Baltimore City Health Department. Open Baltimore contains the urls for JSON files containing the data we need. Neighbourhood-specific mortality data for six different age groups (Infant, 1-14, 15-24, 25-44, 45-64, and 65-84) were collected for between 2011 and 2018. *Please note that the mortality data for ages 85+ exists, but I was not able to download the full Open Baltimore.csv despite many attempts. Hence, we will demonstrate with six, rather than seven, different age groups.*
+
+We also downloaded socioeconomic data such as Percent of Households with No Vehicle Available, Percent of Households with No Internet at Home, and Fast Food Outlet Density per 1,000 Residents.
+
+In order to reproduce this analysis, we require the following libraries:
+
+```{r}
+#| output: false 
+#| echo: true
+#| eval: true
+# Load libraries
+library(tidyverse)
+library(jsonlite)
+library(dplyr)
+library(ggplot2)
+library(purrr)
+library(sf)
+library(knitr)
+path = here::here()
+```
+
+Next, we load the JSON files that were retrieved from the urls in Open Baltimore (please see download_data.R for detailed downloading steps). After loading the data, we extract important features, such as mortality rate and transform the data to long format for visualization. An example of how this is done is below.
+
+```{r}
+#| echo: true
+
+# Function to extract attributes from the JSON structure
+extract_attributes <- function(json_data) {
+  map_df(json_data$features, ~ .x$attributes)
+}
+
+# Read mortality data for each age group; here we demonstrate with the 1-14 group
+mortality_1_14 <- read_json(paste0(path, "/data/json/mortality_1-14.json")) %>%
+  extract_attributes()
+
+# Function to reshape data to long format for plotting
+reshape_to_long = function(data, age_group, prefix, value) {
+  data %>%
+    select(CSA2010, starts_with(prefix)) %>%
+    pivot_longer(cols = starts_with(prefix), names_to = "year", 
+                 values_to = paste0(value, "_rate")) %>%
+    mutate(year = as.integer(str_extract(year, "\\d+$")),
+           age_group = age_group)
+  # data$mean = rep(mean(data$morality_rate), nrow(data))
+}
+
+# Reshape data
+reshape_to_long(mortality_1_14, "1-14", "mort14", "mort")
+
+# Our final data set containing all of the long-formatted data 
+# is called mortality_data
+```
+
+```{r}
+# Function to extract attributes from the JSON structure
+extract_attributes <- function(json_data) {
+  map_df(json_data$features, ~ .x$attributes)
+}
+
+# Read mortality data for each age group
+mortality_infant <- read_json(paste0(path,"/data/json/mortality_infant.json")) %>% extract_attributes()
+mortality_1_14 <- read_json(paste0(path, "/data/json/mortality_1-14.json")) %>% extract_attributes()
+mortality_15_24 <- read_json(paste0(path, "/data/json/mortality_15-24.json")) %>% extract_attributes()
+mortality_25_44 <- read_json(paste0(path, "/data/json/mortality_25-44.json")) %>% extract_attributes()
+mortality_45_64 <- read_json(paste0(path, "/data/json/mortality_45-64.json")) %>% extract_attributes()
+mortality_65_84 <- read_json(paste0(path, "/data/json/mortality_65-84.json")) %>% extract_attributes()
+
+# Read predictor data (e.g., no internet, no vehicles, fast food)
+no_internet <- read_json(paste0(path, "/data/json/no_internet.json")) %>% extract_attributes()
+no_vehicles <- read_json(paste0(path, "/data/json/no_vehicles.json")) %>% extract_attributes()
+fast_food <- read_json(paste0(path, "/data/json/fastfood.json")) %>% extract_attributes()
+
+# Reshape data to long format for plotting
+reshape_to_long = function(data, age_group, prefix, value) {
+  data %>%
+    select(CSA2010, starts_with(prefix)) %>%
+    pivot_longer(cols = starts_with(prefix), names_to = "year", values_to = paste0(value, "_rate")) %>%
+    mutate(year = as.integer(str_extract(year, "\\d+$")),
+           age_group = age_group)
+  # data$mean = rep(mean(data$morality_rate), nrow(data))
+}
+
+mortality_data <- bind_rows(
+  reshape_to_long(mortality_infant, "Infant", "mort1", "mort"),
+  reshape_to_long(mortality_1_14, "1-14", "mort14", "mort"),
+  reshape_to_long(mortality_15_24, "15-24", "mort24", "mort"),
+  reshape_to_long(mortality_25_44, "25-44", "mort44", "mort"),
+  reshape_to_long(mortality_45_64, "45-64", "mort64", "mort"),
+  reshape_to_long(mortality_65_84, "65-84", "mort84", "mort"))
+mortality_data$year = mortality_data$year + 2000
+mean_mortality = mortality_data %>% group_by(age_group, year) %>% summarise(mean_mort = mean(mort_rate, na.rm = TRUE))
+```
+
+### Data visualization
+
+We used a variety of plots to visualize the relationships between socioeconomic covariates and mortality rates over time and across age groups. Scatter plots and trend lines were used to show correlations, and spatial maps were generated to highlight geographical variations in mortality.
+
+## Part 4: Plotting the mortality data over time.
+
+```{r}
+
+png(filename = paste0(path, "/docs/figures/mortality_over_time_by_age_group.png"))
+# Plot mortality rates for each age group over time
+ggplot(mortality_data, aes(x = as.factor(year), y = mort_rate, color = age_group)) +
+  geom_jitter(alpha = 0.7) +
+  geom_line(data = mean_mortality, aes(x = as.factor(year), y = mean_mort, group = age_group), size = 1.5) + 
+  facet_wrap(~age_group, scales = "free", ncol = 2) +
+  theme_minimal() +
+  labs(title = "Mortality Rate by Age Group Over Time",
+       x = "Year",
+       y = "Mortality Rate") +
+  scale_color_brewer("Age Group", palette = "Blues") +
+  theme(legend.position = c(.77,.98), 
+        legend.direction ="horizontal",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8),
+        strip.background = element_blank(),
+        strip.text = element_blank()) 
+dev.off()
+```
+
+```{r}
+#| eval: true
+#| out-width: "65%"
+
+include_graphics(paste0(path, "/docs/figures/mortality_over_time_by_age_group.png"))
+```
+
+## Part 5: Plotting socioeconomic covariates against mortality
+
+For each covariate, we isolated the data to years where mortality data was also reported. First, we show the distributions of each covariate.
+
+```{r}
+# Adding covariates to data frame
+fastfd_data = reshape_to_long(fast_food[,1:5], "", "Fastfd", "fastfd") %>% 
+  subset(select = -c(age_group))
+fastfd_data$year = fastfd_data$year + 2000
+fastfd_mortality_data = inner_join(mortality_data, fastfd_data, 
+                                   by = c("CSA2010", "year")) 
+nohhint_data = reshape_to_long(no_internet[,1:4], "", "nohhint", "nohhint") %>% 
+  subset(select = -c(age_group))
+nohhint_data$year = nohhint_data$year + 2000
+nohhint_mortality_data = inner_join(mortality_data, nohhint_data, 
+                                   by = c("CSA2010", "year")) 
+
+novhcl_data = reshape_to_long(no_vehicles[,1:10], "", "novhcl", "novhcl") %>% 
+  subset(select = -c(age_group))
+novhcl_data$year = novhcl_data$year + 2000
+novhcl_mortality_data = inner_join(mortality_data, novhcl_data, 
+                                   by = c("CSA2010", "year")) 
+
+# Plot distribution of fast food density
+D1 = ggplot(fastfd_data, aes(x = fastfd_rate)) +
+  geom_histogram(aes(y=..density..), bins = 50, alpha = 0.5, fill = "blue") +
+  theme_minimal() +
+  labs(title = "Distribution of Fast Food Outlet Density per 1,000 Residents",
+       x = "Fast Food Outlet Density per 1,000 Residents",
+       y = "Frequency") 
+ 
+# Plot distribution of percentage of households with no internet
+D2 = ggplot(nohhint_data, aes(x = nohhint_rate)) +
+  geom_histogram(aes(y=..density..), bins = 50, alpha = 0.5, fill = "blue") +
+  theme_minimal() +
+  labs(title = "Distribution of Percent of Households with No Internet at Home",
+       x = "Percent of Households with No Internet at Home",
+       y = "Frequency") 
+
+# Plot distribution of percentage of households with no internet
+D3 = ggplot(novhcl_data, aes(x = novhcl_rate)) +
+  geom_histogram(aes(y=..density..), bins = 50, alpha = 0.5, fill = "blue") +
+  theme_minimal() +
+  labs(title = "Distribution of Percent of Households with No Vehicles Available",
+       x = "Percent of Households with No Vehicles Available",
+       y = "Frequency") 
+png(filename = paste0(path, "/docs/figures/distribution_of_covariates.png"))
+gridExtra::grid.arrange(D1, D2, D3, ncol = 1)
+dev.off()
+
+```
+
+```{r}
+#| eval: true
+#| out-width: "65%"
+include_graphics(paste0(path, "/docs/figures/distribution_of_covariates.png"))
+```
+
+# For itnernet, no effect disernable when stratify by year, but when by age group, no internet access increases as mortality increases
+
+# LIkewise for vehicles -- we can see several categories when stratefying by year, and when we stratefy by age group it becomes clear that the pattern is repeated in each age group
+
+```{r}
+#| echo: true
+# Relationship between Fast Food Density and Mortality 
+ggplot(fastfd_mortality_data, aes(x = mort_rate, y = fastfd_rate, color = as.factor(year))) +
+  geom_jitter(alpha = 0.7) +
+  geom_smooth() +
+ facet_wrap(~year, scales = "free", ncol = 2) +
+  theme_minimal() +
+  labs(title = "Fast Food Density vs. Mortality Rate Over Time by Year",
+       x = "Mortality Rate",
+       y = "Fast Food Outlet Density per 1,000 Residents") +
+  scale_color_brewer("Year", palette = "Blues") +
+  theme(legend.position = "bottom", 
+        legend.direction ="horizontal",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8),
+        plot.title = element_text(size = 14)) 
+
+# Relationship between Fast Food Density and Mortality 
+ggplot(fastfd_mortality_data, aes(x = mort_rate, y = fastfd_rate, color = as.factor(year))) +
+  geom_jitter(alpha = 0.7) +
+  geom_smooth() +
+ facet_wrap(~age_group, scales = "free", ncol = 2) +
+  theme_minimal() +
+  labs(title = "Fast Food Density vs. Mortality Rate by Age Group",
+       x = "Mortality Rate",
+       y = "Fast Food Outlet Density per 1,000 Residents") +
+  scale_color_brewer("Year", palette = "Blues") +
+  theme(legend.position = "bottom", 
+        legend.direction ="horizontal",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8),
+        plot.title = element_text(size = 14)) 
+```
+
+```{r}
+png(filename = paste0(path, "/docs/figures/fastfd_vs_mortality_by_year.png"))
+# Relationship between Fast Food Density and Mortality 
+ggplot(fastfd_mortality_data, aes(x = mort_rate, y = fastfd_rate, color = as.factor(year))) +
+  geom_jitter(alpha = 0.7) +
+  geom_smooth() +
+ facet_wrap(~year, scales = "free", ncol = 2) +
+  theme_minimal() +
+  labs(title = "Fast Food Density vs. Mortality Rate Over Time by Year",
+       x = "Mortality Rate",
+       y = "Fast Food Outlet Density per 1,000 Residents") +
+  scale_color_brewer("Year", palette = "Blues") +
+  theme(legend.position = "bottom", 
+        legend.direction ="horizontal",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8),
+        plot.title = element_text(size = 14)) 
+dev.off()
+
+png(filename = paste0(path, "/docs/figures/fastfd_vs_mortality_by_age.png"))
+# Relationship between Fast Food Density and Mortality 
+ggplot(fastfd_mortality_data, aes(x = mort_rate, y = fastfd_rate, color = as.factor(year))) +
+  geom_jitter(alpha = 0.7) +
+  facet_wrap(~age_group, scales = "free", ncol = 2) +
+  theme_minimal() +
+  labs(title = "Fast Food Density vs. Mortality Rate by Age Group",
+       x = "Mortality Rate",
+       y = "Fast Food Outlet Density per 1,000 Residents") +
+  scale_color_brewer("Year", palette = "Blues") +
+  theme(legend.position = "bottom", 
+        legend.direction ="horizontal",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8),
+        plot.title = element_text(size = 14)) 
+dev.off()
+```
+
+```{r}
+#y = lm(mort_rate ~ nohhint_rate + age_group, data = nohhint_mortality_data)
+# Relationship between Home Internet Availability and Mortality 
+png(filename = paste0(path, "/docs/figures/nohhint_vs_mortality_by_year.png"))
+ggplot(nohhint_mortality_data, aes(x = mort_rate, y = nohhint_rate, color = as.factor(year))) +
+  geom_jitter(alpha = 0.7) +
+  geom_smooth() + facet_wrap(~year, scales = "free", ncol = 2) +
+  theme_minimal() +
+  labs(title = "Percent of Households with No Internet vs. Mortality Rate \nby Year",
+       x = "Mortality Rate",
+       y = "Percent of Households with No Internet at Home") +
+  scale_color_brewer("Year", palette = "Blues") +
+  theme(legend.position = "bottom", 
+        legend.direction ="horizontal",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8),
+        plot.title = element_text(size = 14))
+dev.off()
+
+png(filename = paste0(path, "/docs/figures/nohhint_vs_mortality_by_age.png"))
+ggplot(nohhint_mortality_data, aes(x = mort_rate, y = nohhint_rate, color = as.factor(year))) +
+  geom_jitter(alpha = 0.7) +
+  facet_wrap(~age_group, scales = "free", ncol = 2) +
+  theme_minimal() +
+  labs(title = "Percent of Households with No Internet vs. Mortality Rate \nby Age Group",
+       x = "Mortality Rate",
+       y = "Percent of Households with No Internet at Home") +
+  scale_color_brewer("Year", palette = "Blues") +
+  theme(legend.position = "bottom", 
+        legend.direction ="horizontal",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8),
+        plot.title = element_text(size = 14)) 
+dev.off()
+```
+
+```{r}
+png(filename = paste0(path, "/docs/figures/novhcl_vs_mortality_by_year.png"))
+# Relationship between Vehicle Availability and Mortality 
+ggplot(novhcl_mortality_data, aes(x = mort_rate, y = novhcl_rate, color = as.factor(year))) +
+  geom_jitter(alpha = 0.7) +
+  geom_smooth() + facet_wrap(~year, scales = "free", ncol = 2) +
+  theme_minimal() +
+  labs(title = "Percent of Households with No Vehicles Available vs. Mortality Rate \nby Year",
+       x = "Mortality Rate",
+       y = "Percent of Households with No Vehicles Available") +
+  scale_color_brewer("Year", palette = "Blues") +
+  theme(legend.position = "bottom", 
+        legend.direction ="horizontal",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8),
+        plot.title = element_text(size = 14))
+dev.off()
+
+png(filename = paste0(path, "/docs/figures/novhcl_vs_mortality_by_age.png"))
+ggplot(novhcl_mortality_data, aes(x = mort_rate, y = novhcl_rate, color = as.factor(year))) +
+  geom_jitter(alpha = 0.7) +
+  facet_wrap(~age_group, scales = "free", ncol = 2) +
+  theme_minimal() +
+  labs(title = "Percent of Households with No Vehicles Available vs. Mortality Rate \nby Age Group",
+       x = "Mortality Rate",
+       y = "Percent of Households with No Vehicles Available") +
+  scale_color_brewer("Year", palette = "Blues") +
+  theme(legend.position = "bottom", 
+        legend.direction ="horizontal",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8),
+        plot.title = element_text(size = 14)) 
+dev.off()
+```
+
+```{r}
+#| eval: true
+#| out-width: "65%"
+include_graphics(paste0(path, "/docs/figures/fastfd_vs_mortality_by_year.png"))
+include_graphics(paste0(path, "/docs/figures/fastfd_vs_mortality_by_age.png"))
+include_graphics(paste0(path, "/docs/figures/nohhint_vs_mortality_by_year.png"))
+include_graphics(paste0(path, "/docs/figures/nohhint_vs_mortality_by_age.png"))
+include_graphics(paste0(path, "/docs/figures/novhcl_vs_mortality_by_year.png"))
+include_graphics(paste0(path, "/docs/figures/novhcl_vs_mortality_by_age.png"))
+
+```
+
+## Part 6: Plotting spatial maps
+
+```{r}
+library(gridExtra)
+library(grid)
+add_labels <- function(plot, left_label = NULL, top_labels = NULL) {
+  if (!is.null(left_label)) {
+    # Add a left-side (row) label for the age group
+    plot <- arrangeGrob(plot, left = textGrob(left_label, rot = 90, gp = gpar(fontsize = 16)))
+  }
+  if (!is.null(top_labels)) {
+    # Create a row of top labels (years) using textGrob and arrange them in a grid
+    top_grobs <- textGrob(paste(top_labels, collapse = "    "), gp = gpar(fontsize = 12))
+    plot <- grid.arrange(top_grobs, plot, heights = unit.c(unit(1, "lines"), unit(1, "npc")))  # Stack top labels above plot
+  }
+  return(plot)
+}
+```
+
+```{r}
+#|eval: false
+#|output: false
+
+# Read in the JSON data for mortality_infant
+res <- read_json(paste0(path, "/data/json/mortality_1-14.json"), simplifyVector = FALSE)
+df <- purrr::map(res$features, function(r) {
+    if (!is.null(r$geometry) && !is.null(r$geometry$rings) && length(r$geometry$rings) > 0) {
+      # Loop over each ring layer and extract coordinates
+      rings_data <- purrr::map(r$geometry$rings, function(ring) {
+        do.call(rbind, purrr::map(ring, unlist)) %>%
+          as.data.frame(stringsAsFactors = FALSE)
+      })
+      # Combine the multiple rings into a single data frame
+      x <- bind_rows(rings_data)
+      colnames(x) <- c("lon", "lat")
+      x$CSA2010 <- r$attributes$CSA2010 # Include CSA2010
+      return(x)
+    } else {
+      return(NULL)
+    }
+  })
+out <- res %>% extract_attributes()
+names(df) = out$CSA2010
+df = dplyr::bind_rows(df, .id = "CSA2010")
+polygon <- df %>%
+  group_by(CSA2010) %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326) %>%
+  summarise(geometry = st_combine(geometry)) %>%
+  st_cast("POLYGON") %>%
+  left_join(mortality_data, by = "CSA2010")
+
+P1 = ggplot() +
+  geom_sf(data = filter(polygon, age_group == "Infant"), aes(fill = mort_rate)) +
+  facet_wrap( ~ year, ncol = 8) + 
+  labs(x = "", y = "") +
+  scale_y_continuous() +
+  scale_fill_viridis_c("Mortality \nRate", option = "C", na.value = "grey50") +
+  #scale_fill_distiller("Mortality Rate", palette = "Blues") + 
+  theme_minimal() + # Clean theme
+  theme(
+    axis.text.x = element_blank(), # Remove y-axis labels
+    axis.text.y = element_blank(), # Remove y-axis labels
+    strip.text = element_text(size = 16),# Adjust facet label size
+    legend.title = element_text(size = 12),
+    legend.key.size = unit(10, "mm"),
+    legend.position = "right"
+  )
+P1_labeled <- add_labels(P1, left_label = "Infant")
+
+P14 = ggplot() +
+  geom_sf(data = filter(polygon, age_group == "1-14"), aes(fill = mort_rate)) +
+  facet_wrap( ~ year, ncol = 8) + 
+  labs(x = "", y = "") +
+  scale_y_continuous() +
+  scale_fill_viridis_c("", option = "C", na.value = "grey50") +
+  #scale_fill_distiller("Mortality Rate", palette = "Blues") + 
+  theme_minimal() + # Clean theme
+  theme(
+    axis.text.x = element_blank(), # Remove y-axis labels
+    axis.text.y = element_blank(), # Remove y-axis labels
+    strip.text = element_blank(),# Adjust facet label size
+    legend.title = element_blank(),
+    legend.key.size = unit(10, "mm"),
+    legend.position = "right"
+  ) 
+
+P14_labeled <- add_labels(P14, left_label = "1-14")
+
+P24 = ggplot() +
+  geom_sf(data = filter(polygon, age_group == "15-24"), aes(fill = mort_rate)) +
+  facet_wrap( ~ year, ncol = 8) + 
+  labs(x = "", y = "") +
+  scale_y_continuous() +
+  scale_fill_viridis_c("", option = "C", na.value = "grey50") +
+  #scale_fill_distiller("Mortality Rate", palette = "Blues") + 
+  theme_minimal() + # Clean theme
+  theme(
+    axis.text.x = element_blank(), # Remove y-axis labels
+    axis.text.y = element_blank(), # Remove y-axis labels
+    strip.text = element_blank(),# Adjust facet label size
+    legend.title = element_blank(),
+    legend.key.size = unit(10, "mm"),
+    legend.position = "right"
+  )
+P24_labeled = add_labels(P24, left_label = "15-24")
+
+P44 = ggplot() +
+  geom_sf(data = filter(polygon, age_group == "25-44"), aes(fill = mort_rate)) +
+  facet_wrap( ~ year, ncol = 8) + 
+  labs(x = "", y = "") +
+  scale_y_continuous() +
+  scale_fill_viridis_c("", option = "C", na.value = "grey50") +
+  #scale_fill_distiller("Mortality Rate", palette = "Blues") + 
+  theme_minimal() + # Clean theme
+  theme(
+    axis.text.x = element_blank(), # Remove y-axis labels
+    axis.text.y = element_blank(), # Remove y-axis labels
+    strip.text = element_blank(),# Adjust facet label size
+    legend.title = element_blank(),
+    legend.key.size = unit(10, "mm"),
+    legend.position = "right"
+  ) 
+
+P44_labeled = add_labels(P44, left_label = "25-44")
+
+P64 = ggplot() +
+  geom_sf(data = filter(polygon, age_group == "45-64"), aes(fill = mort_rate)) +
+  facet_wrap( ~ year, ncol = 8) + 
+  labs(x = "", y = "") +
+  scale_y_continuous() +
+  scale_fill_viridis_c("", option = "C", na.value = "grey50") +
+  #scale_fill_distiller("Mortality Rate", palette = "Blues") + 
+  theme_minimal() + # Clean theme
+  theme(
+    axis.text.x = element_blank(), # Remove y-axis labels
+    axis.text.y = element_blank(), # Remove y-axis labels
+    strip.text = element_blank(),# Adjust facet label size
+    legend.title = element_blank(),
+    legend.key.size = unit(10, "mm"),
+    legend.position = "right"
+  ) 
+P64_labeled = add_labels(P64, left_label = "45-64")
+
+P84 = ggplot() +
+  geom_sf(data = filter(polygon, age_group == "65-84"), aes(fill = mort_rate)) +
+  facet_wrap( ~ year, ncol = 8) + 
+  labs(x = "", y = "") +
+  scale_y_continuous() +
+  scale_fill_viridis_c("", option = "C", na.value = "grey50") +
+  #scale_fill_distiller("Mortality Rate", palette = "Blues") + 
+  theme_minimal() + # Clean theme
+  theme(
+    axis.text.x = element_blank(), # Remove y-axis labels
+    axis.text.y = element_blank(), # Remove y-axis labels
+    strip.text = element_blank(),# Adjust facet label size
+    legend.title = element_blank(),
+    legend.key.size = unit(10, "mm"),
+    legend.position = "right"
+  ) 
+P84_labeled = add_labels(P84, left_label = "65-84")
+final_plot = gridExtra::grid.arrange(P1_labeled, P14_labeled, P24_labeled,
+                                     P44_labeled, P64_labeled, P84_labeled, 
+                                     ncol = 1)
+ggsave(paste0(path,"/docs/figures/mortality_maps.png"), final_plot, width = 15, height = 20)
+
+```
+
+```{r}
+#| eval: true
+knitr::include_graphics(paste0(path,"/docs/figures/mortality_maps.png"))
+```
